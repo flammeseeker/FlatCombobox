@@ -1,0 +1,167 @@
+Imports System
+Imports System.Windows.Forms
+Imports System.Drawing
+Imports System.Drawing.Drawing2D
+Imports System.Runtime.InteropServices
+
+Namespace DrawFlat
+    <ToolboxBitmap(GetType(System.Windows.Forms.ComboBox))>
+    Public Class FlatComboBox
+        Inherits ComboBox
+
+#Region "ComboInfoHelper"
+        Friend Class ComboInfoHelper
+            <DllImport("user32")>
+            Private Shared Function GetComboBoxInfo(ByVal hwndCombo As IntPtr, ByRef info As ComboBoxInfo) As Boolean
+            End Function
+
+
+#Region "RECT struct"
+            <StructLayout(LayoutKind.Sequential)>
+            Private Structure RECT
+                Public Left As Integer
+                Public Top As Integer
+                Public Right As Integer
+                Public Bottom As Integer
+            End Structure
+
+#End Region
+
+#Region "ComboBoxInfo Struct"
+            <StructLayout(LayoutKind.Sequential)>
+            Private Structure ComboBoxInfo
+                Public cbSize As Integer
+                Public rcItem As RECT
+                Public rcButton As RECT
+                Public stateButton As IntPtr
+                Public hwndCombo As IntPtr
+                Public hwndEdit As IntPtr
+                Public hwndList As IntPtr
+            End Structure
+
+#End Region
+
+            Public Shared Function GetComboDropDownWidth() As Integer
+                Dim cb As ComboBox = New ComboBox()
+                Dim width As Integer = GetComboDropDownWidth(cb.Handle)
+                cb.Dispose()
+                Return width
+            End Function
+
+            Public Shared Function GetComboDropDownWidth(ByVal handle As IntPtr) As Integer
+                Dim cbi As ComboBoxInfo = New ComboBoxInfo()
+                cbi.cbSize = Marshal.SizeOf(cbi)
+                GetComboBoxInfo(handle, cbi)
+                Dim width As Integer = cbi.rcButton.Right - cbi.rcButton.Left
+                Return width
+            End Function
+        End Class
+
+#End Region
+
+        Public Const WM_ERASEBKGND As Integer = &H14
+        Public Const WM_PAINT As Integer = &HF
+        Public Const WM_NC_PAINT As Integer = &H85
+        Public Const WM_PRINTCLIENT As Integer = &H318
+        Private Shared DropDownButtonWidth As Integer = 17
+
+        Declare Auto Function SendMessage Lib "user32.dll" (ByVal hWnd As IntPtr, ByVal msg As Integer, ByVal wParam As IntPtr, ByVal lParam As IntPtr) As IntPtr
+
+        <DllImport("user32")>
+        Public Shared Function GetWindowDC(ByVal hWnd As IntPtr) As IntPtr
+        End Function
+
+        <DllImport("user32")>
+        Public Shared Function ReleaseDC(ByVal hWnd As IntPtr, ByVal hDC As IntPtr) As Integer
+        End Function
+
+        Shared Sub New()
+            DropDownButtonWidth = ComboInfoHelper.GetComboDropDownWidth() + 2
+        End Sub
+
+        Public Sub New()
+            MyBase.New()
+            Me.SetStyle(ControlStyles.DoubleBuffer, True)
+        End Sub
+
+        Protected Overrides Sub OnSelectedValueChanged(ByVal e As EventArgs)
+            MyBase.OnSelectedValueChanged(e)
+            Me.Invalidate()
+        End Sub
+
+
+        Protected Overrides Sub WndProc(ByRef m As Message)
+            If Me.DropDownStyle = ComboBoxStyle.Simple Then
+                MyBase.WndProc(m)
+                Return
+            End If
+
+            Dim hDC As IntPtr = IntPtr.Zero
+            Dim gdc As Graphics = Nothing
+
+            Select Case m.Msg
+                Case WM_NC_PAINT
+                    hDC = GetWindowDC(Me.Handle)
+                    gdc = Graphics.FromHdc(hDC)
+                    SendMessage(Me.Handle, WM_ERASEBKGND, hDC, 0)
+                    SendPrintClientMsg()    ' send to draw client area
+                    PaintFlatControlBorder(Me, gdc)
+                    m.Result = CType(1, IntPtr) ' indicate msg has been processed			
+                    ReleaseDC(m.HWnd, hDC)
+                    gdc.Dispose()
+                Case WM_PAINT
+                    MyBase.WndProc(m)
+                    ' flatten the border area again
+                    hDC = GetWindowDC(Me.Handle)
+                    gdc = Graphics.FromHdc(hDC)
+                    Dim p As Pen = New Pen(If(Me.Enabled, BackColor, SystemColors.Control), 2)
+                    gdc.DrawRectangle(p, New Rectangle(2, 2, Me.Width - 3, Me.Height - 3))
+                    PaintFlatDropDown(Me, gdc)
+                    PaintFlatControlBorder(Me, gdc)
+                    ReleaseDC(m.HWnd, hDC)
+                    gdc.Dispose()
+                Case Else
+                    MyBase.WndProc(m)
+            End Select
+        End Sub
+
+        Private Sub SendPrintClientMsg()
+            ' We send this message for the control to redraw the client area
+            Dim gClient As Graphics = Me.CreateGraphics()
+            Dim ptrClientDC As IntPtr = gClient.GetHdc()
+            SendMessage(Me.Handle, WM_PRINTCLIENT, ptrClientDC, 0)
+            gClient.ReleaseHdc(ptrClientDC)
+            gClient.Dispose()
+        End Sub
+
+        Private Sub PaintFlatControlBorder(ByVal ctrl As Control, ByVal g As Graphics)
+            Dim rect As Rectangle = New Rectangle(0, 0, ctrl.Width, ctrl.Height)
+
+            If ctrl.Focused = False OrElse ctrl.Enabled = False Then
+                ControlPaint.DrawBorder(g, rect, SystemColors.ControlDark, ButtonBorderStyle.Solid)
+            Else
+                ControlPaint.DrawBorder(g, rect, Color.Black, ButtonBorderStyle.Solid)
+            End If
+        End Sub
+
+        Public Shared Sub PaintFlatDropDown(ByVal ctrl As Control, ByVal g As Graphics)
+            Dim rect As Rectangle = New Rectangle(ctrl.Width - DropDownButtonWidth, 0, DropDownButtonWidth, ctrl.Height)
+            ControlPaint.DrawComboButton(g, rect, ButtonState.Flat)
+        End Sub
+
+        Protected Overrides Sub OnLostFocus(ByVal e As EventArgs)
+            MyBase.OnLostFocus(e)
+            Me.Invalidate()
+        End Sub
+
+        Protected Overrides Sub OnGotFocus(ByVal e As EventArgs)
+            MyBase.OnGotFocus(e)
+            Me.Invalidate()
+        End Sub
+
+        Protected Overrides Sub OnResize(ByVal e As EventArgs)
+            MyBase.OnResize(e)
+            Me.Invalidate()
+        End Sub
+    End Class
+End Namespace
